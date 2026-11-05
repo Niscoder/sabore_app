@@ -24,8 +24,50 @@ class SaboreApp extends StatelessWidget {
   }
 }
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final TextEditingController _searchController = TextEditingController();
+
+  String? _errorMessage;
+  String? _searchedTerm;
+
+  void _executeSearch() {
+    final rawText = _searchController.text;
+    final sanitizedText = rawText.trim();
+
+    if (sanitizedText.isEmpty) {
+      setState(() {
+        _errorMessage = 'Por favor, digite o nome de uma receita. Espaços em branco não são aceitos.';
+        _searchedTerm = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _errorMessage = null;
+      _searchedTerm = sanitizedText;
+    });
+  }
+
+  void _clearSearch() {
+    setState(() {
+      _searchController.clear();
+      _errorMessage = null;
+      _searchedTerm = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,12 +78,6 @@ class HomePage extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.favorite_border),
-            onPressed: () {},
-          ),
-        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -49,115 +85,137 @@ class HomePage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Banner de Boas-vindas / Identidade do App
+              // Identidade do App
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: Colors.deepOrange.shade50,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.deepOrange.shade200),
                 ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: const Row(
                   children: [
-                    Row(
-                      children: [
-                        Icon(Icons.restaurant_menu, color: Colors.deepOrange, size: 28),
-                        SizedBox(width: 8),
-                        Text(
-                          'Descubra Novas Receitas',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.deepOrange,
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 8),
+                    Icon(Icons.restaurant_menu, color: Colors.deepOrange, size: 24),
+                    SizedBox(width: 8),
                     Text(
-                      'Encontre sugestões de pratos, ingredientes detalhados e instruções passo a passo.',
-                      style: TextStyle(fontSize: 14, color: Colors.black87),
+                      'Busca de Receitas Saborê',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.deepOrange,
+                      ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 20),
 
-              // Barra de Pesquisa (Estrutura Visual)
+              // Campo de Pesquisa Rotulado
               TextField(
+                controller: _searchController,
+                onSubmitted: (_) => _executeSearch(),
                 decoration: InputDecoration(
-                  hintText: 'Pesquisar receita por nome...',
+                  labelText: 'Nome da Receita',
+                  hintText: 'Ex: Pizza, Bolo de Cenoura...',
                   prefixIcon: const Icon(Icons.search),
-                  suffixIcon: const Icon(Icons.tune),
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_searchController.text.isNotEmpty || _searchedTerm != null)
+                        IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: _clearSearch,
+                          tooltip: 'Limpar consulta',
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.arrow_forward),
+                        onPressed: _executeSearch,
+                        tooltip: 'Pesquisar',
+                      ),
+                    ],
+                  ),
+                  errorText: _errorMessage,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
+
+              // Botão explícito de pesquisa adicional
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _executeSearch,
+                  icon: const Icon(Icons.search),
+                  label: const Text('Buscar Receita'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
               const SizedBox(height: 24),
 
-              // Título da Seção de Listagem
-              const Text(
-                'Receitas em Destaque',
-                style: TextStyle(
+              // Feedback do Termo Válido Recebido
+              if (_searchedTerm != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle_outline, color: Colors.green),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Resultado para: "$_searchedTerm"',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Listagem de Resultados Provisórios
+              Text(
+                _searchedTerm != null
+                    ? 'Resultados Encontrados (Provisório)'
+                    : 'Todas as Receitas',
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 12),
 
-              // Item de Exemplo 1
               Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                elevation: 1,
+                margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  leading: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.local_pizza, color: Colors.deepOrange),
-                  ),
-                  title: const Text(
-                    'Pizza Margherita',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: const Text('Preparo: 30 min | Servimentos: 4'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  leading: const Icon(Icons.local_pizza, color: Colors.deepOrange),
+                  title: const Text('Pizza Margherita'),
+                  subtitle: const Text('Massa tradicional com queijo e manjericão'),
                   onTap: () {},
                 ),
               ),
-
-              // Item de Exemplo 2
               Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                elevation: 1,
+                margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  leading: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.bakery_dining, color: Colors.deepOrange),
-                  ),
-                  title: const Text(
-                    'Bolo de Chocolate',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: const Text('Preparo: 45 min | Servimentos: 8'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  leading: const Icon(Icons.bakery_dining, color: Colors.deepOrange),
+                  title: const Text('Bolo de Chocolate'),
+                  subtitle: const Text('Bolo fofinho com cobertura de brigadeiro'),
                   onTap: () {},
                 ),
               ),
