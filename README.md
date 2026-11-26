@@ -87,6 +87,3 @@ test/
 
 É necessária conexão com a internet para carregar as receitas.
 
-## Vídeo de demonstração
-
-<link do vídeo>
