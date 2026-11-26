@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
-import '../data/mock_recipes.dart';
 import '../models/recipe_model.dart';
 import '../routes.dart';
+import '../services/api_service.dart';
 import '../state/app_state.dart';
 import '../widgets/recipe_card.dart';
 import '../widgets/status_message.dart';
 
-/// Tela principal: identidade, pesquisa e listagem (RF01, RF02, RF03, RF08).
+enum _LoadStatus { loading, success, error }
+
+/// Tela principal: identidade, listagem e pesquisa remota
+/// (RF01, RF02, RF03, RF06, RF07, RF08, RF09).
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -15,46 +18,107 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final ApiService _api = ApiService();
   final TextEditingController _searchController = TextEditingController();
 
-  String? _errorMessage;
+  _LoadStatus _status = _LoadStatus.loading;
+  List<Recipe> _recipes = const [];
+  List<Recipe>? _allRecipesCache;
+  String? _inputError;
+  String? _loadError;
   String? _searchedTerm;
 
-  /// Provisório: filtra os dados de exemplo localmente.
-  /// Na próxima etapa será substituído pela busca na API.
-  List<Recipe> get _visibleRecipes {
-    final term = _searchedTerm;
-    if (term == null) return mockRecipes;
-    final lower = term.toLowerCase();
-    return mockRecipes
-        .where((recipe) => recipe.name.toLowerCase().contains(lower))
-        .toList();
+  /// Identifica a requisição mais recente. Respostas antigas são
+  /// descartadas, evitando estado confuso com consultas concorrentes.
+  int _requestId = 0;
+
+  bool get _isLoading => _status == _LoadStatus.loading;
+
+  @override
+  void initState() {
+    super.initState();
+    // Carrega uma única vez, na abertura da tela (RF01),
+    // e não a cada reconstrução.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadAll());
+  }
+
+  Future<void> _runRequest(
+      Future<List<Recipe>> Function() request, {
+        required String? term,
+        bool cacheAsAll = false,
+      }) async {
+    final requestId = ++_requestId;
+
+    setState(() {
+      _status = _LoadStatus.loading;
+      _loadError = null;
+      _inputError = null;
+      _searchedTerm = term;
+    });
+
+    try {
+      final result = await request();
+      if (!mounted || requestId != _requestId) return;
+      setState(() {
+        _recipes = result;
+        if (cacheAsAll) _allRecipesCache = result;
+        _status = _LoadStatus.success;
+      });
+    } on ApiException catch (error) {
+      if (!mounted || requestId != _requestId) return;
+      setState(() {
+        _loadError = error.message;
+        _status = _LoadStatus.error;
+      });
+    }
+  }
+
+  Future<void> _loadAll({bool forceRefresh = false}) async {
+    final cache = _allRecipesCache;
+    if (!forceRefresh && cache != null) {
+      _requestId++; // cancela qualquer resposta pendente
+      setState(() {
+        _recipes = cache;
+        _searchedTerm = null;
+        _loadError = null;
+        _status = _LoadStatus.success;
+      });
+      return;
+    }
+    await _runRequest(_api.fetchRecipes, term: null, cacheAsAll: true);
   }
 
   void _executeSearch() {
-    final sanitizedText = _searchController.text.trim();
+    if (_isLoading) return; // bloqueia cliques repetidos (RF06)
+
+    final term = _searchController.text.trim();
     FocusScope.of(context).unfocus();
 
-    if (sanitizedText.isEmpty) {
+    if (term.isEmpty) {
       setState(() {
-        _errorMessage =
+        _inputError =
         'Digite o nome de uma receita. Espaços em branco não são aceitos.';
       });
       return;
     }
 
-    setState(() {
-      _errorMessage = null;
-      _searchedTerm = sanitizedText;
-    });
+    _searchController.text = term; // mostra o termo já sem espaços externos
+    _runRequest(() => _api.searchRecipes(term), term: term);
   }
 
   void _clearSearch() {
-    setState(() {
-      _searchController.clear();
-      _errorMessage = null;
-      _searchedTerm = null;
-    });
+    _searchController.clear();
+    setState(() => _inputError = null);
+    _loadAll();
+  }
+
+  void _retry() {
+    final term = _searchedTerm;
+    if (term != null) {
+      _runRequest(() => _api.searchRecipes(term), term: term);
+    } else {
+      _loadAll(forceRefresh: true);
+    }
   }
 
   @override
@@ -66,7 +130,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final appState = AppStateScope.of(context);
-    final recipes = _visibleRecipes;
 
     return Scaffold(
       appBar: AppBar(
@@ -97,14 +160,10 @@ class _HomeScreenState extends State<HomeScreen> {
               controller: _searchController,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _executeSearch(),
-              onChanged: (_) {
-                // Atualiza a visibilidade do botão limpar e remove o erro
-                // assim que a pessoa volta a digitar.
-                setState(() => _errorMessage = null);
-              },
+              onChanged: (_) => setState(() => _inputError = null),
               decoration: InputDecoration(
                 labelText: 'Nome da receita',
-                hintText: 'Ex.: pizza, cookies, bolo...',
+                hintText: 'Ex.: pizza, cookies, chicken...',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon:
                 (_searchController.text.isNotEmpty || _searchedTerm != null)
@@ -114,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: _clearSearch,
                 )
                     : null,
-                errorText: _errorMessage,
+                errorText: _inputError,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -124,9 +183,16 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _executeSearch,
-                icon: const Icon(Icons.search),
-                label: const Text('Buscar receita'),
+                // Desabilitado durante o carregamento (RF06).
+                onPressed: _isLoading ? null : _executeSearch,
+                icon: _isLoading
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+                    : const Icon(Icons.search),
+                label: Text(_isLoading ? 'Carregando...' : 'Buscar receita'),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -155,26 +221,77 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            if (recipes.isEmpty)
-              StatusMessage(
-                icon: Icons.search_off,
-                title: 'Nenhuma receita encontrada',
-                message:
-                'Não há receitas com "$_searchedTerm". Tente outro nome.',
-                actionLabel: 'Ver todas as receitas',
-                onAction: _clearSearch,
-              )
-            else
-              ...recipes.map(
-                    (recipe) => RecipeCard(
-                  recipe: recipe,
-                  onTap: () => AppRoutes.openDetail(context, recipe),
-                ),
-              ),
+            ..._buildContent(),
           ],
         ),
       ),
     );
+  }
+
+  List<Widget> _buildContent() {
+    switch (_status) {
+      case _LoadStatus.loading:
+        return const [
+          Padding(
+            padding: EdgeInsets.symmetric(vertical: 48),
+            child: Column(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Carregando receitas...'),
+              ],
+            ),
+          ),
+        ];
+
+      case _LoadStatus.error:
+        return [
+          StatusMessage(
+            icon: Icons.wifi_off,
+            title: 'Não foi possível carregar',
+            message: _loadError ?? 'Ocorreu um erro inesperado.',
+            actionLabel: 'Tentar novamente',
+            onAction: _retry,
+          ),
+        ];
+
+      case _LoadStatus.success:
+        if (_recipes.isEmpty) {
+          return [
+            _searchedTerm != null
+                ? StatusMessage(
+              icon: Icons.search_off,
+              title: 'Nenhuma receita encontrada',
+              message:
+              'Não há receitas com "$_searchedTerm". Tente outro nome.',
+              actionLabel: 'Ver todas as receitas',
+              onAction: _clearSearch,
+            )
+                : StatusMessage(
+              icon: Icons.no_food,
+              title: 'Nenhuma receita disponível',
+              message: 'A API não retornou receitas no momento.',
+              actionLabel: 'Recarregar',
+              onAction: _retry,
+            ),
+          ];
+        }
+        return [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              '${_recipes.length} receita(s)',
+              style: TextStyle(color: Colors.grey.shade700),
+            ),
+          ),
+          ..._recipes.map(
+                (recipe) => RecipeCard(
+              recipe: recipe,
+              onTap: () => AppRoutes.openDetail(context, recipe),
+            ),
+          ),
+        ];
+    }
   }
 }
 
